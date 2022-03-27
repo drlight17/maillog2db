@@ -13,7 +13,7 @@ maillog2db is a golang program designed to monitor your postfix maillog and push
 
 Please create a github issue or submit a pull request if you would like to see the data parsed/handled in any other way, and we will consider making any adjustments.
 
-# Added subject extraction from postfix log
+**Added subject extraction from postfix log**
 
 # Example Usage
 
