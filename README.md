@@ -3,10 +3,6 @@ maillog2db
 
 Capture mail logs to your database
 
-# Support maillog2db
-
-[<img src="https://liberapay.com/assets/widgets/donate.svg">](https://liberapay.com/rdlaitila/donate)
-
 # Purpose
 
 maillog2db is a golang program designed to monitor your postfix maillog and push log entries to a mysql database. maillog2db captures the following data from postfix logs:
@@ -16,6 +12,8 @@ maillog2db is a golang program designed to monitor your postfix maillog and push
 * Connecting Clients are tracked. 
 
 Please create a github issue or submit a pull request if you would like to see the data parsed/handled in any other way, and we will consider making any adjustments.
+
+# Added subject extraction from postfix log
 
 # Example Usage
 
