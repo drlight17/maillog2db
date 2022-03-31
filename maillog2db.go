@@ -58,8 +58,10 @@ const (
         cleanup_regex1_str string = `([a-zA-Z0-9]+):\smessage-id=(.*)`
         // samoilov 27.03.2022
         //this regex matches the cleanup subject log entry
-//      cleanup_subject_regex1_str string = `([a-zA-Z0-9]+)\sSubject:(.*) from `
-        cleanup_subject_regex1_str string = `([a-zA-Z0-9]+): warning: header Subject:\s(.*) from `
+        cleanup_subject_regex1_str string = `([a-zA-Z0-9]+):\swarning:\sheader\sSubject:\s(.*)\sfrom\s`
+		// samoilov 30.03.2022
+		//this regex matches the cleanup milter log entry
+		cleanup_milter_regex1_str string = `([a-zA-Z0-9]+):\s(.*reject):\s(.*):\s([0-9].*);\sfrom=(\<.*?\>).*to=(\<.*?\>)`
 )
 
 type Pfmaillog2dbLog struct {
@@ -104,6 +106,8 @@ type Pfmaillog2dbDelivery struct {
         Id                int64
         DeliveryTimestamp time.Time
         DeliveryQueueid   string `sql:"type:varchar(16);"`
+		// samoilov 30.03.2022
+		DeliveryFrom      string `sql:"type:varchar(100);"`
         DeliveryTo        string `sql:"type:varchar(100);"`
         DeliveryRelay     string `sql:"type:varchar(100);"`
         DeliveryDelay     string `sql:"type:varchar(50);"`
@@ -184,6 +188,8 @@ func main() {
         cleanup_regex1 := regexp.MustCompile(cleanup_regex1_str)
         // samoilov 27.03.2022
         cleanup_subject_regex1 := regexp.MustCompile(cleanup_subject_regex1_str)
+		// samoilov 30.03.2022
+        cleanup_milter_regex1 := regexp.MustCompile(cleanup_milter_regex1_str)
 
         for line := range tail_handle.Lines {
                 if entry_firstpart_regex.MatchString(line.Text) == false {
@@ -244,6 +250,26 @@ func main() {
                                 matches[0][6],
                                 matches[0][7],
                                 matches[0][8])
+                        break
+				// samoilov 30.03.2022
+				case cleanup_milter_regex1.MatchString(remaining):
+                        matches := cleanup_milter_regex1.FindAllStringSubmatch(remaining, -1)
+                        if config.debug {
+								//fmt.Println("timestamp:", matches[0][6])
+                                fmt.Println("queueid:", matches[0][1])
+								fmt.Println("from:", matches[0][5])
+                                fmt.Println("to:", matches[0][6])
+                                fmt.Println("status:", matches[0][2])
+                                fmt.Println("statusext:", matches[0][4])
+                        }
+
+                        recordDeliveryMilteredEntry(
+                                entry_firstpart[0][1],
+                                matches[0][1],
+                                matches[0][5],
+                                matches[0][6],
+                                matches[0][2],
+                                matches[0][4])
                         break
                 case qmgr_regex1.MatchString(remaining):
                         matches := qmgr_regex1.FindAllStringSubmatch(remaining, -1)
@@ -470,6 +496,43 @@ func recordDeliveryEntry(TIMESTAMP string, QUEUEID string, TO string, RELAY stri
                 deliveryentries[0].DeliveryDelay = DELAY
                 deliveryentries[0].DeliveryDelays = DELAYS
                 deliveryentries[0].DeliveryDsn = DSN
+                deliveryentries[0].DeliveryStatus = STATUS
+                deliveryentries[0].DeliveryStatusext = STATUSEXT
+                DBCONN.Save(&deliveryentries[0])
+        }
+}
+// samoilov 30.03.2022
+func recordDeliveryMilteredEntry(TIMESTAMP string, QUEUEID string, FROM string, TO string, STATUS string, STATUSEXT string) {
+        var deliveryentries []Pfmaillog2dbDelivery
+        DBCONN.Where(`
+        delivery_timestamp=? and
+        delivery_queueid=? and
+        delivery_from=? and
+        delivery_to=? and
+        delivery_status=? and
+        delivery_statusext=?`,
+                pfdate2golang(TIMESTAMP),
+                QUEUEID,
+                FROM,
+                TO,
+                STATUS,
+                STATUSEXT).Find(&deliveryentries)
+
+        if len(deliveryentries) == 0 {
+                DBCONN.Save(&Pfmaillog2dbDelivery{
+                        RowCreatedAt:      time.Now(),
+                        DeliveryTimestamp: pfdate2golang(TIMESTAMP),
+                        DeliveryQueueid:   QUEUEID,
+                        DeliveryFrom:        FROM,
+                        DeliveryTo:     TO,
+                        DeliveryStatus:    STATUS,
+                        DeliveryStatusext: STATUSEXT})
+        } else {
+                deliveryentries[0].RowUpdatedAt = time.Now()
+                deliveryentries[0].DeliveryTimestamp = pfdate2golang(TIMESTAMP)
+                deliveryentries[0].DeliveryQueueid = QUEUEID
+                deliveryentries[0].DeliveryFrom = FROM
+                deliveryentries[0].DeliveryTo = TO
                 deliveryentries[0].DeliveryStatus = STATUS
                 deliveryentries[0].DeliveryStatusext = STATUSEXT
                 DBCONN.Save(&deliveryentries[0])
