@@ -15,6 +15,9 @@ Please create a github issue or submit a pull request if you would like to see t
 
 **Added subject extraction from postfix log**
 
+# Build binary in order to use with systemd
+`go build maillog2db.go`
+
 # Example Usage
 
 Once you have the binary available either pre-compiled or source-compiled, usage is as follows (assuming installed under /opt/maillog2db):
