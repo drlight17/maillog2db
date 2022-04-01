@@ -43,7 +43,8 @@ type Config struct {
 
 const (
         //this regex matches the timestamp, host, process and pid from the line entry
-        entry_firstpart_regex_str string = `([a-zA-Z]{1,3}\s[0-9]{2}\s[0-9]{2}:[0-9]{2}:[0-9]{2})\s([\S]+)\s([\S]+)\[([0-9]{1,})\]:`
+		// samoilov 01.04.2022 syslog fix of regex
+        entry_firstpart_regex_str string = `([a-zA-Z]{1,3}\s*[0-9]{1,2}\s[0-9]{2}:[0-9]{2}:[0-9]{2})\s([\S]+)\s([\S]+)\[([0-9]{1,})\]:`
 
         //this regex matches the smtpd client log entry
         smtpd_regex1_str string = `([a-zA-Z0-9]+):\sclient=(.*)`
