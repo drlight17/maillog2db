@@ -304,7 +304,7 @@ func main() {
                                 matches[0][4],
                                 matches[0][5])
 						// samoilov 17.04.2022 add size and from to delivery table
-						recordDeliverySize(
+						recordDeliverySizeFrom(
 								entry_firstpart[0][1],
                                 matches[0][1],
 								matches[0][2],
@@ -331,6 +331,8 @@ func main() {
                         }
 
                         recordMessageSubjectIdEntry(matches[0][1], matches[0][2])
+						// samoilov 19.04.2022 add subject to delivery table
+						recordDeliverySubject (matches[0][1], matches[0][2])
                         break
                 default:
                         if config.debug {
@@ -422,8 +424,8 @@ func recordMessageEntry(TIMESTAMP string, MAILHOST string, QUEUEID string, FROM 
         }
 }
 
-// samoilov 17.04.2022 function for append delivery size into delivery table
-func recordDeliverySize (TIMESTAMP string, QUEUEID string, FROM string, SIZE string) {
+// samoilov 17.04.2022 function for append delivery size and from into delivery table
+func recordDeliverySizeFrom (TIMESTAMP string, QUEUEID string, FROM string, SIZE string) {
         //var messageentries []Pfmaillog2dbMessage
 		var deliveryentries []Pfmaillog2dbDelivery
 		DBCONN.Where(`
@@ -499,6 +501,23 @@ func recordMessageSubjectIdEntry(QUEUEID string, MESSAGESUBJECT string) {
                 DBCONN.Save(&messageentries[0])
         }
 }
+// samoilov 19.04.2022 function for append subject into deliveries table
+func recordDeliverySubject(QUEUEID string, MESSAGESUBJECT string) {
+        var deliveryentries []Pfmaillog2dbDelivery
+        DBCONN.Where(`
+        delivery_queueid=?
+    `, QUEUEID).Find(&deliveryentries)
+
+        if len(deliveryentries) == 0 {
+                DBCONN.Save(&Pfmaillog2dbDelivery{
+                        DeliveryQueueid: QUEUEID,
+                        DeliverySubject:      MESSAGESUBJECT})
+        } else {
+                deliveryentries[0].RowUpdatedAt = time.Now()
+                deliveryentries[0].DeliverySubject = MESSAGESUBJECT
+                DBCONN.Save(&deliveryentries[0])
+        }
+}
 
 func recordDeliveryEntry(TIMESTAMP string, QUEUEID string, TO string, RELAY string, DELAY string, DELAYS string, DSN string, STATUS string, STATUSEXT string) {
         var deliveryentries []Pfmaillog2dbDelivery
@@ -539,6 +558,7 @@ func recordDeliveryEntry(TIMESTAMP string, QUEUEID string, TO string, RELAY stri
 						DeliveryFrom:      messageentries[0].MessageFrom,
 						DeliveryTo:        TO,
 						DeliverySize:      messageentries[0].MessageSize,
+						DeliverySubject:   messageentries[0].MessageSubject,
 						DeliveryRelay:     RELAY,
 						DeliveryDelay:     DELAY,
 						DeliveryDelays:    DELAYS,
