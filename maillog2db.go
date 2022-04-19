@@ -110,6 +110,9 @@ type Pfmaillog2dbDelivery struct {
 		// samoilov 30.03.2022
 		DeliveryFrom      string `sql:"type:varchar(100);"`
         DeliveryTo        string `sql:"type:varchar(100);"`
+		// samoilov 17.04.2022
+		DeliverySize      string `sql:"type:varchar(50);"`
+		DeliverySubject   string `sql:"type:varchar(500);"`
         DeliveryRelay     string `sql:"type:varchar(100);"`
         DeliveryDelay     string `sql:"type:varchar(50);"`
         DeliveryDelays    string `sql:"type:varchar(50);"`
@@ -122,8 +125,13 @@ type Pfmaillog2dbDelivery struct {
 
 var DBCONN *gorm.DB
 var ERROR error
+// samoilov 18.04.2022
+/*var lastto string
+var lastfrom string*/
+var lastid int64
 
 func main() {
+
         cwd, _ := os.Getwd()
 
         flag_maillog := flag.String("maillog", "/var/log/maillog", "Path To Maillog. Default: /var/log/maillog")
@@ -139,7 +147,7 @@ func main() {
         config := Config{*flag_maillog, *flag_logfile, *flag_dbhost, *flag_dbport, *flag_dbuser, *flag_dbpass, *flag_dbname, *flag_debug}
 
         logfile, err := os.OpenFile(config.logfile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-
+	
         if err != nil {
                 log.Fatal(err)
         } else {
@@ -191,7 +199,7 @@ func main() {
         cleanup_subject_regex1 := regexp.MustCompile(cleanup_subject_regex1_str)
 		// samoilov 30.03.2022
         cleanup_milter_regex1 := regexp.MustCompile(cleanup_milter_regex1_str)
-
+		
         for line := range tail_handle.Lines {
                 if entry_firstpart_regex.MatchString(line.Text) == false {
                         continue
@@ -227,6 +235,7 @@ func main() {
 
                         recordMessageClientEntry(matches[0][1], matches[0][2])
                         break
+				
                 case smtp_regex1.MatchString(remaining):
                         matches := smtp_regex1.FindAllStringSubmatch(remaining, -1)
 
@@ -240,7 +249,6 @@ func main() {
                                 fmt.Println("status:", matches[0][7])
                                 fmt.Println("statusext:", matches[0][8])
                         }
-
                         recordDeliveryEntry(
                                 entry_firstpart[0][1],
                                 matches[0][1],
@@ -251,12 +259,16 @@ func main() {
                                 matches[0][6],
                                 matches[0][7],
                                 matches[0][8])
+						//lastto = matches[0][2]
+						//samoilov 18.04.2022 wait until key pressed
+						/*go counter()
+						fmt.Println("Press the Enter Key to process next case")
+						fmt.Scanln()*/
                         break
 				// samoilov 30.03.2022
 				case cleanup_milter_regex1.MatchString(remaining):
                         matches := cleanup_milter_regex1.FindAllStringSubmatch(remaining, -1)
                         if config.debug {
-								//fmt.Println("timestamp:", matches[0][6])
                                 fmt.Println("queueid:", matches[0][1])
 								fmt.Println("from:", matches[0][5])
                                 fmt.Println("to:", matches[0][6])
@@ -291,6 +303,13 @@ func main() {
                                 matches[0][3],
                                 matches[0][4],
                                 matches[0][5])
+						// samoilov 17.04.2022 add size and from to delivery table
+						recordDeliverySize(
+								entry_firstpart[0][1],
+                                matches[0][1],
+								matches[0][2],
+                                matches[0][3])
+						//lastfrom = matches[0][2]
                         break
                 case cleanup_regex1.MatchString(remaining):
                         matches := cleanup_regex1.FindAllStringSubmatch(remaining, -1)
@@ -403,6 +422,33 @@ func recordMessageEntry(TIMESTAMP string, MAILHOST string, QUEUEID string, FROM 
         }
 }
 
+// samoilov 17.04.2022 function for append delivery size into delivery table
+func recordDeliverySize (TIMESTAMP string, QUEUEID string, FROM string, SIZE string) {
+        //var messageentries []Pfmaillog2dbMessage
+		var deliveryentries []Pfmaillog2dbDelivery
+		DBCONN.Where(`
+        delivery_queueid=?`,
+				QUEUEID).Find(&deliveryentries)
+				
+                //fmt.Println("deliveryentries array:", deliveryentries)
+								
+        if len(deliveryentries) == 0 {
+                DBCONN.Save(&Pfmaillog2dbDelivery{
+						RowCreatedAt:      time.Now(),
+				        DeliveryTimestamp: pfdate2golang(TIMESTAMP),
+                        DeliveryQueueid:   QUEUEID,
+						DeliveryFrom:        FROM,
+                        DeliverySize:        SIZE})
+        } else {
+                deliveryentries[0].RowUpdatedAt = time.Now()
+				deliveryentries[0].DeliveryTimestamp = pfdate2golang(TIMESTAMP)
+                //deliveryentries[0].DeliveryQueueid = QUEUEID
+				deliveryentries[0].DeliveryFrom = FROM
+                deliveryentries[0].DeliverySize = SIZE
+                DBCONN.Save(&deliveryentries[0])
+        }
+}
+
 func recordMessageClientEntry(QUEUEID string, CLIENTSTR string) {
         var messageentries []Pfmaillog2dbMessage
         DBCONN.Where(`
@@ -436,7 +482,7 @@ func recordMessageMessageIdEntry(QUEUEID string, MESSAGEID string) {
                 DBCONN.Save(&messageentries[0])
         }
 }
-// samoilov 27.03.2022
+// samoilov 27.03.2022 function for append subject into messages table
 func recordMessageSubjectIdEntry(QUEUEID string, MESSAGESUBJECT string) {
         var messageentries []Pfmaillog2dbMessage
         DBCONN.Where(`
@@ -456,68 +502,74 @@ func recordMessageSubjectIdEntry(QUEUEID string, MESSAGESUBJECT string) {
 
 func recordDeliveryEntry(TIMESTAMP string, QUEUEID string, TO string, RELAY string, DELAY string, DELAYS string, DSN string, STATUS string, STATUSEXT string) {
         var deliveryentries []Pfmaillog2dbDelivery
-        DBCONN.Where(`
+   /*     DBCONN.Where(`
         delivery_timestamp=? and
-        delivery_queueid=? and
-        delivery_to=? and
-        delivery_relay=? and
-        delivery_delay=? and
-        delivery_delays=? and
-        delivery_dsn=? and
-        delivery_status=? and
-        delivery_statusext=?`,
+        delivery_queueid=?`,
                 pfdate2golang(TIMESTAMP),
-                QUEUEID,
-                TO,
-                RELAY,
-                DELAY,
-                DELAYS,
-                DSN,
-                STATUS,
-                STATUSEXT).Find(&deliveryentries)
-
+                QUEUEID).Find(&deliveryentries)*/
+		DBCONN.Where(`
+		delivery_queueid=?`,
+                QUEUEID).Find(&deliveryentries)
         if len(deliveryentries) == 0 {
-                DBCONN.Save(&Pfmaillog2dbDelivery{
-                        RowCreatedAt:      time.Now(),
-                        DeliveryTimestamp: pfdate2golang(TIMESTAMP),
-                        DeliveryQueueid:   QUEUEID,
-                        DeliveryTo:        TO,
-                        DeliveryRelay:     RELAY,
-                        DeliveryDelay:     DELAY,
-                        DeliveryDelays:    DELAYS,
-                        DeliveryDsn:       DSN,
-                        DeliveryStatus:    STATUS,
-                        DeliveryStatusext: STATUSEXT})
+			DBCONN.Save(&Pfmaillog2dbDelivery{
+					RowCreatedAt:      time.Now(),
+					DeliveryTimestamp: pfdate2golang(TIMESTAMP),
+					DeliveryQueueid:   QUEUEID,
+					DeliveryTo:        TO,
+					DeliveryRelay:     RELAY,
+					DeliveryDelay:     DELAY,
+					DeliveryDelays:    DELAYS,
+					DeliveryDsn:       DSN,
+					DeliveryStatus:    STATUS,
+					DeliveryStatusext: STATUSEXT})
         } else {
-                deliveryentries[0].RowUpdatedAt = time.Now()
-                deliveryentries[0].DeliveryTimestamp = pfdate2golang(TIMESTAMP)
-                deliveryentries[0].DeliveryQueueid = QUEUEID
-                deliveryentries[0].DeliveryTo = TO
-                deliveryentries[0].DeliveryRelay = RELAY
-                deliveryentries[0].DeliveryDelay = DELAY
-                deliveryentries[0].DeliveryDelays = DELAYS
-                deliveryentries[0].DeliveryDsn = DSN
-                deliveryentries[0].DeliveryStatus = STATUS
-                deliveryentries[0].DeliveryStatusext = STATUSEXT
-                DBCONN.Save(&deliveryentries[0])
+				// samoilov 18.04.2022 check if last added row id is equal to current found row id then create new row
+				if deliveryentries[0].Id == lastid {
+					//fmt.Println("This is multi recipient message! Creating new row!")
+					//deliveryentries[0].Id++
+					var messageentries []Pfmaillog2dbMessage
+							DBCONN.Where(`
+							message_queueid=?
+						`, QUEUEID).Find(&messageentries)
+						
+					DBCONN.Save(&Pfmaillog2dbDelivery{
+						RowCreatedAt:      time.Now(),
+						DeliveryTimestamp: pfdate2golang(TIMESTAMP),
+						DeliveryQueueid:   QUEUEID,
+						DeliveryFrom:      messageentries[0].MessageFrom,
+						DeliveryTo:        TO,
+						DeliverySize:      messageentries[0].MessageSize,
+						DeliveryRelay:     RELAY,
+						DeliveryDelay:     DELAY,
+						DeliveryDelays:    DELAYS,
+						DeliveryDsn:       DSN,
+						DeliveryStatus:    STATUS,
+						DeliveryStatusext: STATUSEXT})
+				} else {
+					deliveryentries[0].RowUpdatedAt = time.Now()
+					deliveryentries[0].DeliveryTimestamp = pfdate2golang(TIMESTAMP)
+					deliveryentries[0].DeliveryQueueid = QUEUEID
+					deliveryentries[0].DeliveryTo = TO
+					deliveryentries[0].DeliveryRelay = RELAY
+					deliveryentries[0].DeliveryDelay = DELAY
+					deliveryentries[0].DeliveryDelays = DELAYS
+					deliveryentries[0].DeliveryDsn = DSN
+					deliveryentries[0].DeliveryStatus = STATUS
+					deliveryentries[0].DeliveryStatusext = STATUSEXT
+					DBCONN.Save(&deliveryentries[0])
+					lastid = deliveryentries[0].Id
+					/*fmt.Println("LASTID:", lastid)*/
+				}
         }
 }
-// samoilov 30.03.2022
+// samoilov 30.03.2022 function for append miltered and refused messages into db
 func recordDeliveryMilteredEntry(TIMESTAMP string, QUEUEID string, FROM string, TO string, STATUS string, STATUSEXT string) {
         var deliveryentries []Pfmaillog2dbDelivery
         DBCONN.Where(`
         delivery_timestamp=? and
-        delivery_queueid=? and
-        delivery_from=? and
-        delivery_to=? and
-        delivery_status=? and
-        delivery_statusext=?`,
+        delivery_queueid=?`,
                 pfdate2golang(TIMESTAMP),
-                QUEUEID,
-                FROM,
-                TO,
-                STATUS,
-                STATUSEXT).Find(&deliveryentries)
+                QUEUEID).Find(&deliveryentries)
 
         if len(deliveryentries) == 0 {
                 DBCONN.Save(&Pfmaillog2dbDelivery{
@@ -551,3 +603,12 @@ func pfdate2golang(POSTFIXDATE string) time.Time {
 
         return time.Now()
 }
+//samoilov 18.04.2022 for wait for key press in debug
+/*func counter() {
+    i := 0
+    for {
+        //fmt.Println(i)
+        time.Sleep(time.Second * 1)
+        i++
+    }
+}*/
